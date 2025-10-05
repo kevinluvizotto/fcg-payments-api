@@ -1,5 +1,8 @@
+using System;
+
 namespace FCG.Payments.Api.Models
 {
+#nullable enable
     public class Payment
     {
         public Guid Id { get; set; }
