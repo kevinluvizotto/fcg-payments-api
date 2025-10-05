@@ -16,8 +16,8 @@ Parte do projeto da Fase 3 (migração para microsserviços).
 
 ### Pré-requisitos
 
-- .NET 8 SDK
-- (Opcional) Docker
+- .NET 8 SDK.
+- (Opcional) Docker.
 
 # Restaurar pacotes e compilar
 
