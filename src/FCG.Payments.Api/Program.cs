@@ -93,7 +93,7 @@ namespace FCG.Payments.Api
                 c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
                 {
                     In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-                    Description = "Insira o token JWT",
+                    Description = "Insira o token JWT sem o Berear ou Aspas",
                     Name = "Authorization",
                     Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
                     Scheme = "bearer",
