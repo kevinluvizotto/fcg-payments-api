@@ -1,20 +1,16 @@
-FROM mcr.microsoft.com/dotnet/asp.net:8.0 AS base
-WORKDIR /app
-EXPOSE 8080
-
+# Etapa de build
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["fcg-payments-api.sln", "."]
-COPY ["src/FCG.Payments.Api/FCG.Payments.Api.csproj", "src/FCG.Payments.Api/"]
-RUN dotnet restore
 COPY . .
-WORKDIR "/src/src/FCG.Payments.Api"
-RUN dotnet build -c Release -o /app/build
+RUN dotnet restore fcg-payments-api.sln
+RUN dotnet publish src/FCG.Payments.Api/FCG.Payments.Api.csproj -c Release -o /app/publish
 
-FROM build AS publish
-RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
-
-FROM base AS final
+# Etapa de runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
-COPY --from=publish /app/publish .
+COPY --from=build /app/publish .
+
+EXPOSE 80
+ENV ASPNETCORE_URLS=http://+:80
+
 ENTRYPOINT ["dotnet", "FCG.Payments.Api.dll"]
