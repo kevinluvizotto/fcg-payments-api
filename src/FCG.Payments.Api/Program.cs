@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -21,14 +20,14 @@ namespace FCG.Payments.Api
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // 🧩 Logging
+            // 🧾 Logging
             builder.Services.AddLogging(logging =>
             {
                 logging.AddConsole();
-                logging.SetMinimumLevel(LogLevel.Debug);
+                logging.SetMinimumLevel(LogLevel.Information);
             });
 
-            // 💾 Banco SQL Server
+            // 💾 Banco de dados SQL Server
             var connectionString = builder.Configuration["ConnectionStrings:FCGDatabase"]
                 ?? throw new InvalidOperationException("Connection string 'FCGDatabase' não está configurada.");
             builder.Services.AddDbContext<PaymentsDbContext>(options =>
@@ -77,21 +76,21 @@ namespace FCG.Payments.Api
                 };
             });
 
-            // 🔒 Políticas de autorização
+            // 🧩 Autorização
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
                 options.AddPolicy("UserOrAdmin", policy => policy.RequireRole("Admin", "User"));
             });
 
-            // 🧾 Swagger
+            // 📘 Swagger
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(c =>
             {
                 c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
                 {
                     In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-                    Description = "Insira o token JWT sem o 'Bearer' ou aspas.",
+                    Description = "Insira o token JWT sem o prefixo 'Bearer'",
                     Name = "Authorization",
                     Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
                     Scheme = "bearer",
@@ -115,129 +114,106 @@ namespace FCG.Payments.Api
 
             var app = builder.Build();
 
+            // 🌐 Pipeline
             app.UseSwagger();
             app.UseSwaggerUI();
             app.UseAuthentication();
             app.UseAuthorization();
 
-            // 🌡 Health check
+            // ✅ Health check
             app.MapGet("/health", () =>
             {
                 app.Logger.LogInformation("GET /health chamado.");
                 return Results.Ok("OK");
             });
 
-            // 🧾 CRUD de pagamentos padrão
+            // ✅ Criar pagamento
             app.MapPost("/payments", async (Payment payment, PaymentsDbContext db, ILogger<Program> logger) =>
             {
                 try
                 {
-                    logger.LogInformation("POST /payments chamado por {UserId}", payment.UserId);
                     payment.Id = Guid.NewGuid();
                     payment.Date = DateTime.UtcNow;
                     db.Payments.Add(payment);
                     await db.SaveChangesAsync();
+                    logger.LogInformation("Pagamento criado com sucesso: {PaymentId}", payment.Id);
                     return Results.Created($"/payments/{payment.Id}", payment);
                 }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Erro ao criar pagamento.");
-                    return Results.StatusCode(500);
+                    return Results.Json(new { error = "Erro interno ao criar pagamento." }, statusCode: 500);
                 }
             }).RequireAuthorization("UserOrAdmin");
 
-            app.MapGet("/payments", async (PaymentsDbContext db, ILogger<Program> logger) =>
+            // ✅ Listar pagamentos (Admin)
+            app.MapGet("/payments", async (PaymentsDbContext db) =>
             {
-                try
-                {
-                    logger.LogInformation("GET /payments chamado.");
-                    var payments = await db.Payments.ToListAsync();
-                    return Results.Ok(payments);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Erro ao listar pagamentos.");
-                    return Results.StatusCode(500);
-                }
+                var payments = await db.Payments.ToListAsync();
+                return Results.Ok(payments);
             }).RequireAuthorization("AdminOnly");
 
-            app.MapGet("/payments/{id}", async (Guid id, PaymentsDbContext db, ILogger<Program> logger) =>
+            // ✅ Buscar pagamento por Id
+            app.MapGet("/payments/{id}", async (Guid id, PaymentsDbContext db) =>
             {
-                try
-                {
-                    logger.LogInformation("GET /payments/{Id} chamado.", id);
-                    var payment = await db.Payments.FindAsync(id);
-                    return payment is null ? Results.NotFound() : Results.Ok(payment);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Erro ao obter pagamento com Id {Id}.", id);
-                    return Results.StatusCode(500);
-                }
+                var payment = await db.Payments.FindAsync(id);
+                return payment is null ? Results.NotFound() : Results.Ok(payment);
             }).RequireAuthorization("UserOrAdmin");
 
-            app.MapPut("/payments/{id}", async (Guid id, Payment updated, PaymentsDbContext db, ILogger<Program> logger) =>
+            // ✅ Atualizar pagamento (Admin)
+            app.MapPut("/payments/{id}", async (Guid id, Payment updated, PaymentsDbContext db) =>
             {
-                try
-                {
-                    var payment = await db.Payments.FindAsync(id);
-                    if (payment is null) return Results.NotFound();
+                var payment = await db.Payments.FindAsync(id);
+                if (payment is null) return Results.NotFound();
 
-                    payment.UserId = updated.UserId;
-                    payment.Amount = updated.Amount;
-                    payment.Status = updated.Status;
-                    payment.Date = DateTime.UtcNow;
+                payment.UserId = updated.UserId;
+                payment.Amount = updated.Amount;
+                payment.Status = updated.Status;
+                payment.Date = DateTime.UtcNow;
+                await db.SaveChangesAsync();
 
-                    await db.SaveChangesAsync();
-                    return Results.NoContent();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Erro ao atualizar pagamento {Id}", id);
-                    return Results.StatusCode(500);
-                }
+                return Results.NoContent();
             }).RequireAuthorization("AdminOnly");
 
-            app.MapDelete("/payments/{id}", async (Guid id, PaymentsDbContext db, ILogger<Program> logger) =>
+            // ✅ Excluir pagamento (Admin)
+            app.MapDelete("/payments/{id}", async (Guid id, PaymentsDbContext db) =>
             {
-                try
-                {
-                    var payment = await db.Payments.FindAsync(id);
-                    if (payment is null) return Results.NotFound();
+                var payment = await db.Payments.FindAsync(id);
+                if (payment is null) return Results.NotFound();
 
-                    db.Payments.Remove(payment);
-                    await db.SaveChangesAsync();
-                    return Results.NoContent();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Erro ao excluir pagamento {Id}", id);
-                    return Results.StatusCode(500);
-                }
+                db.Payments.Remove(payment);
+                await db.SaveChangesAsync();
+                return Results.NoContent();
             }).RequireAuthorization("AdminOnly");
 
-            // 💳 NOVO ENDPOINT: Comprar jogo
-            app.MapPost("/payments/buy", async (HttpContext http, PaymentsDbContext db, ILogger<Program> logger) =>
+            // 🛒 NOVO — Endpoint de compra de jogo
+            app.MapPost("/payments/buy", async (
+                HttpContext http,
+                PaymentsDbContext db,
+                ILogger<Program> logger) =>
             {
                 try
                 {
-                    var user = http.User;
-                    if (user?.Identity == null || !user.Identity.IsAuthenticated)
+                    var gameIdString = http.Request.Query["gameId"].ToString();
+                    if (string.IsNullOrEmpty(gameIdString))
+                        return Results.BadRequest(new { error = "O parâmetro gameId é obrigatório." });
+
+                    if (!Guid.TryParse(gameIdString, out var gameId))
+                        return Results.BadRequest(new { error = "O gameId informado é inválido." });
+
+                    var userId = http.User.Claims.FirstOrDefault(c =>
+                        c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+
+                    if (string.IsNullOrEmpty(userId))
                         return Results.Unauthorized();
 
-                    var gameId = http.Request.Query["gameId"].ToString();
-                    if (string.IsNullOrEmpty(gameId))
-                        return Results.BadRequest(new { error = "Parâmetro 'gameId' é obrigatório." });
-
-                    var userId = user.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value
-                        ?? user.Identity.Name
-                        ?? "desconhecido";
+                    logger.LogInformation("🛒 Criando pagamento - UserId: {UserId}, GameId: {GameId}", userId, gameId);
 
                     var payment = new Payment
                     {
                         Id = Guid.NewGuid(),
-                        UserId = userId,
-                        Amount = 100.00m, // 💡 valor fixo de exemplo; integrar com Games API futuramente
+                        UserId = userId, 
+                        Amount = 100.00m, 
                         Status = "Completed",
                         Date = DateTime.UtcNow
                     };
@@ -245,14 +221,12 @@ namespace FCG.Payments.Api
                     db.Payments.Add(payment);
                     await db.SaveChangesAsync();
 
-                    logger.LogInformation("Compra registrada: GameId={GameId}, User={UserId}", gameId, userId);
-
-                    return Results.Ok(new
+                    return Results.Created($"/payments/{payment.Id}", new
                     {
                         message = "Compra realizada com sucesso!",
-                        paymentId = payment.Id,
-                        userId,
-                        gameId
+                        payment.Id,
+                        payment.UserId,
+                        GameId = gameId.ToString()
                     });
                 }
                 catch (Exception ex)
@@ -260,11 +234,8 @@ namespace FCG.Payments.Api
                     logger.LogError(ex, "Erro ao processar compra.");
                     return Results.Json(new { error = "Erro interno ao processar compra." }, statusCode: 500);
                 }
-            })
-            .RequireAuthorization("UserOrAdmin")
-            .WithTags("Payments");
+            }).RequireAuthorization("UserOrAdmin");
 
-            // 🚀 Iniciar app
             app.Run();
         }
     }
