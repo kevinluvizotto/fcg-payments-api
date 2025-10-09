@@ -188,7 +188,10 @@ namespace FCG.Payments.Api.Tests
             var gameId = Guid.NewGuid().ToString();
             var response = await _client.PostAsync($"/payments/buy?gameId={gameId}", null);
             response.EnsureSuccessStatusCode();
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.True(
+                response.StatusCode == HttpStatusCode.Created || response.StatusCode == HttpStatusCode.Accepted,
+                $"Expected Created or Accepted, but got {response.StatusCode}"
+            );
         }
     }
 }

@@ -190,7 +190,7 @@ namespace FCG.Payments.Api
                 return Results.NoContent();
             }).RequireAuthorization("AdminOnly");
 
-            // 🛒 Compra completa (pagamento + biblioteca)
+            // 🛒 NOVO — Endpoint de compra completa (pagamento + biblioteca)
             app.MapPost("/payments/buy", async (
                 [FromQuery] Guid? gameId,
                 HttpContext http,
@@ -224,27 +224,26 @@ namespace FCG.Payments.Api
 
                     db.Payments.Add(payment);
                     await db.SaveChangesAsync();
+
                     logger.LogInformation("💾 Pagamento registrado com sucesso (Id: {Id})", payment.Id);
 
-                    // 🎮 Monta URL da Users API dinamicamente (via appsettings.json)
-                    var usersApiUrl = config["UsersApiUrl"] ?? "https://fcg-apim-fiap-klztt.azure-api.net";
-                    var usersAddGamePath = config["UsersAddGamePath"] ?? "/users/users/me/games";
-                    var addGameUrl = $"{usersApiUrl}{usersAddGamePath}";
+                    // 🎮 Adiciona o jogo na biblioteca via Users API
+                    var usersApiUrl = config["UsersApiUrl"] ?? "https://fcg-apim-fiap-klztt.azure-api.net/users";
+                    var addGameUrl = $"{usersApiUrl}/users/me/games?gameId={gameId}";
 
                     using var client = new HttpClient();
                     client.DefaultRequestHeaders.Add("Authorization", http.Request.Headers["Authorization"].ToString());
                     client.DefaultRequestHeaders.Add("Accept", "application/json");
 
-                    var payload = new { GameId = gameId.ToString() };
-                    var response = await client.PostAsJsonAsync(addGameUrl, payload);
+                    // 🚀 Faz a requisição sem body (Users API espera o gameId na query)
+                    var response = await client.PostAsync(addGameUrl, null);
 
-                    var responseBody = await response.Content.ReadAsStringAsync();
-                    logger.LogInformation("📡 Chamada à Users API => {Url} | Status: {StatusCode} | Body: {Body}",
-                        addGameUrl, response.StatusCode, responseBody);
+                    var body = await response.Content.ReadAsStringAsync();
+                    logger.LogInformation("📡 Chamada à Users API => {Url} | Status: {StatusCode} | Body: {Body}", addGameUrl, response.StatusCode, body);
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        logger.LogWarning("⚠️ Falha ao registrar jogo na biblioteca: {Msg}", responseBody);
+                        logger.LogWarning("⚠️ Falha ao registrar jogo na biblioteca: {Body}", body);
                         return Results.Json(new
                         {
                             warning = "Pagamento criado, mas não foi possível adicionar o jogo à biblioteca.",
