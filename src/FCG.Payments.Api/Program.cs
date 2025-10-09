@@ -2,6 +2,8 @@
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -9,8 +11,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using FCG.Payments.Api.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace FCG.Payments.Api
 {
@@ -186,34 +190,34 @@ namespace FCG.Payments.Api
                 return Results.NoContent();
             }).RequireAuthorization("AdminOnly");
 
-            // 🛒 NOVO — Endpoint de compra de jogo
+            // 🛒 NOVO — Endpoint de compra completa (pagamento + biblioteca)
             app.MapPost("/payments/buy", async (
+                [FromQuery] Guid? gameId,
                 HttpContext http,
                 PaymentsDbContext db,
-                ILogger<Program> logger) =>
+                ILogger<Program> logger,
+                IConfiguration config) =>
             {
                 try
                 {
-                    var gameIdString = http.Request.Query["gameId"].ToString();
-                    if (string.IsNullOrEmpty(gameIdString))
+                    if (gameId == null || gameId == Guid.Empty)
                         return Results.BadRequest(new { error = "O parâmetro gameId é obrigatório." });
 
-                    if (!Guid.TryParse(gameIdString, out var gameId))
-                        return Results.BadRequest(new { error = "O gameId informado é inválido." });
-
+                    // 📦 Extrai o UserId do token JWT
                     var userId = http.User.Claims.FirstOrDefault(c =>
                         c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
 
                     if (string.IsNullOrEmpty(userId))
                         return Results.Unauthorized();
 
-                    logger.LogInformation("🛒 Criando pagamento - UserId: {UserId}, GameId: {GameId}", userId, gameId);
+                    logger.LogInformation("🛒 Iniciando compra — UserId: {UserId}, GameId: {GameId}", userId, gameId);
 
+                    // 💳 Cria o pagamento local
                     var payment = new Payment
                     {
                         Id = Guid.NewGuid(),
-                        UserId = userId, 
-                        Amount = 100.00m, 
+                        UserId = userId,
+                        Amount = 100.00m,
                         Status = "Completed",
                         Date = DateTime.UtcNow
                     };
@@ -221,9 +225,39 @@ namespace FCG.Payments.Api
                     db.Payments.Add(payment);
                     await db.SaveChangesAsync();
 
+                    logger.LogInformation("💾 Pagamento registrado com sucesso (Id: {Id})", payment.Id);
+
+                    // 🎮 Adiciona o jogo na biblioteca via Users API
+                    var usersApiUrl = config["UsersApiUrl"] ?? "https://fcg-apim-fiap-klztt.azure-api.net/users";
+                    var addGameUrl = $"{usersApiUrl}/users/me/games?gameId={gameId}";
+
+                    using var client = new HttpClient();
+                    client.DefaultRequestHeaders.Add("Authorization", http.Request.Headers["Authorization"].ToString());
+                    client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+                    // 🚀 Faz a requisição sem body (Users API espera o gameId na query)
+                    var response = await client.PostAsync(addGameUrl, null);
+
+                    var body = await response.Content.ReadAsStringAsync();
+                    logger.LogInformation("📡 Chamada à Users API => {Url} | Status: {StatusCode} | Body: {Body}", addGameUrl, response.StatusCode, body);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning("⚠️ Falha ao registrar jogo na biblioteca: {Body}", body);
+                        return Results.Json(new
+                        {
+                            warning = "Pagamento criado, mas não foi possível adicionar o jogo à biblioteca.",
+                            payment.Id,
+                            payment.UserId,
+                            GameId = gameId.ToString()
+                        }, statusCode: 202);
+                    }
+
+                    logger.LogInformation("🎮 Jogo adicionado à biblioteca do usuário {UserId}", userId);
+
                     return Results.Created($"/payments/{payment.Id}", new
                     {
-                        message = "Compra realizada com sucesso!",
+                        message = "Compra realizada e jogo adicionado à biblioteca com sucesso!",
                         payment.Id,
                         payment.UserId,
                         GameId = gameId.ToString()
@@ -231,7 +265,7 @@ namespace FCG.Payments.Api
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Erro ao processar compra.");
+                    logger.LogError(ex, "Erro ao processar compra completa.");
                     return Results.Json(new { error = "Erro interno ao processar compra." }, statusCode: 500);
                 }
             }).RequireAuthorization("UserOrAdmin");
