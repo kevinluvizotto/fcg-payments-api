@@ -29,17 +29,22 @@ namespace FCG.Payments.Api.Tests
         {
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.Name, "TestUser"),
-                new Claim(ClaimTypes.Role, role)
+                new Claim(ClaimTypes.NameIdentifier, "7390acc8-2c65-409a-b10f-103f93cb884b"),
+                new Claim(ClaimTypes.Role, role),
+                new Claim(ClaimTypes.Email, "admin@test.com")
             };
+
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("super_secret_dev_key_1234567890_LONGER_KEY"));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
             var token = new JwtSecurityToken(
                 issuer: "fcg-users-api",
                 audience: "fcg-users-api",
                 claims: claims,
                 expires: DateTime.Now.AddHours(1),
-                signingCredentials: creds);
+                signingCredentials: creds
+            );
+
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
@@ -49,9 +54,7 @@ namespace FCG.Payments.Api.Tests
             var response = await _client.GetAsync("/health");
             response.EnsureSuccessStatusCode();
             var content = await response.Content.ReadAsStringAsync();
-            // Remover aspas extras, se houver
-            var trimmedContent = content.Trim('"');
-            Assert.Equal("OK", trimmedContent);
+            Assert.Equal("OK", content.Trim('"'));
         }
 
         [Fact]
@@ -59,12 +62,14 @@ namespace FCG.Payments.Api.Tests
         {
             _client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("User"));
+
             var payment = new Payment
             {
                 UserId = "7390acc8-2c65-409a-b10f-103f93cb884b",
                 Amount = 99.99m,
                 Status = "Pending"
             };
+
             var response = await _client.PostAsJsonAsync("/payments", payment);
             response.EnsureSuccessStatusCode();
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -89,6 +94,7 @@ namespace FCG.Payments.Api.Tests
         {
             _client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("Admin"));
+
             var response = await _client.GetAsync("/payments");
             response.EnsureSuccessStatusCode();
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -107,22 +113,26 @@ namespace FCG.Payments.Api.Tests
         {
             _client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("Admin"));
+
             var payment = new Payment
             {
                 UserId = "7390acc8-2c65-409a-b10f-103f93cb884b",
                 Amount = 99.99m,
                 Status = "Pending"
             };
+
             var postResponse = await _client.PostAsJsonAsync("/payments", payment);
             postResponse.EnsureSuccessStatusCode();
             var createdPayment = await postResponse.Content.ReadFromJsonAsync<Payment>();
+
             var updatedPayment = new Payment
             {
                 UserId = createdPayment!.UserId,
                 Amount = 149.99m,
                 Status = "Completed"
             };
-            var putResponse = await _client.PutAsJsonAsync($"/payments/{createdPayment!.Id}", updatedPayment);
+
+            var putResponse = await _client.PutAsJsonAsync($"/payments/{createdPayment.Id}", updatedPayment);
             Assert.Equal(HttpStatusCode.NoContent, putResponse.StatusCode);
         }
 
@@ -131,16 +141,19 @@ namespace FCG.Payments.Api.Tests
         {
             _client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("Admin"));
+
             var payment = new Payment
             {
                 UserId = "7390acc8-2c65-409a-b10f-103f93cb884b",
                 Amount = 99.99m,
                 Status = "Pending"
             };
+
             var postResponse = await _client.PostAsJsonAsync("/payments", payment);
             postResponse.EnsureSuccessStatusCode();
             var createdPayment = await postResponse.Content.ReadFromJsonAsync<Payment>();
-            var deleteResponse = await _client.DeleteAsync($"/payments/{createdPayment!.Id}");
+
+            var deleteResponse = await _client.DeleteAsync($"/payments/{createdPayment.Id}");
             Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
         }
 
@@ -149,18 +162,33 @@ namespace FCG.Payments.Api.Tests
         {
             _client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("User"));
+
             var payment = new Payment
             {
                 UserId = "7390acc8-2c65-409a-b10f-103f93cb884b",
                 Amount = 99.99m,
                 Status = "Pending"
             };
+
             var postResponse = await _client.PostAsJsonAsync("/payments", payment);
             postResponse.EnsureSuccessStatusCode();
             var createdPayment = await postResponse.Content.ReadFromJsonAsync<Payment>();
-            var response = await _client.GetAsync($"/payments/{createdPayment!.Id}");
+
+            var response = await _client.GetAsync($"/payments/{createdPayment.Id}");
             response.EnsureSuccessStatusCode();
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task Post_BuyGame_WithValidToken_ReturnsCreated()
+        {
+            _client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GenerateJwtToken("User"));
+
+            var gameId = Guid.NewGuid().ToString();
+            var response = await _client.PostAsync($"/payments/buy?gameId={gameId}", null);
+            response.EnsureSuccessStatusCode();
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         }
     }
 }
